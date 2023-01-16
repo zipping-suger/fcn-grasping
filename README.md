@@ -1,7 +1,6 @@
 # fcn-grasping
-FCN based one-shot grasping 
 ---
-
+FCN based one-shot grasping
 ## Installation
 Tested on Ubuntu 20.04.4 LTS with the following dependencies:
 * Python 3.6

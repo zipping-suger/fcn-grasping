@@ -20,8 +20,8 @@ def plot_Y(centre_point, rotate_theta, radius, color=(0, 0, 255)):
     start_point = centre_point
     for i in range(3):
         end_point = centre_point + np.array(
-            [np.floor(radius * np.cos(rotate_theta + np.pi * i / 3)),
-             np.floor(radius * np.sin(rotate_theta + np.pi * i / 3))])
+            [np.floor(radius * np.cos(rotate_theta + 2*np.pi * i / 3)),
+             np.floor(radius * np.sin(rotate_theta + 2*np.pi * i / 3))])
         cv2.line(img, start_point.astype(int), end_point.astype(int), color, thickness=1)
 
 
@@ -39,7 +39,7 @@ def click_event(event, x, y, flags, params):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # draw point on the image
-        cv2.circle(img, (x, y), 3, (0, 255, 255), -1)
+        cv2.circle(img, (x, y), 3, (255, 255, 255), -1)
 
         # TODO interactive annotation
         success = bool(input("Success? Yes:Any Key; No: Enter\n"))
@@ -50,7 +50,7 @@ def click_event(event, x, y, flags, params):
         if hand_config_index == 1:
             plot_line(np.array([x, y]), rotate_theta, line_length, color=(0, 255, 255))
         elif hand_config_index == 2:
-            plot_line(np.array([x, y]), rotate_theta, line_length, color=(255, 255, 0))
+            plot_Y(np.array([x, y]), rotate_theta, line_length, color=(255, 255, 0))
 
         annotation.append({
             "name": img_name,
@@ -109,3 +109,5 @@ if __name__ == '__main__':
         # cv2.destroyAllWindows()
 
     print("All annotated.\n")
+
+

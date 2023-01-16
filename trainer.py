@@ -1,13 +1,9 @@
 import os
-import time
 import numpy as np
 import cv2
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-from utils import CrossEntropyLoss2d
-from NN_models import HybridNet, MultiQNet
+from NN_models import TeacherNet, StudentNet, HybridNet
 from scipy import ndimage
 
 
@@ -62,38 +58,19 @@ class Trainer(object):
             print("CUDA is *NOT* detected. Running with only CPU.")
             self.use_cuda = False
 
-        # Fully convolutional network
-        self.model = None
-        self.future_reward_discount = future_reward_discount
-
-        # Initialize Huber loss
+        # Initialize Loss
+        # self.criterion = torch.nn.CrossEntropyLoss(reduce=False) # Cross entropy loss
+        # self.criterion = torch.nn.MSELoss(reduce=False)  # MSE loss
         self.criterion = torch.nn.SmoothL1Loss(reduce=False)  # Huber loss
         if self.use_cuda:
             self.criterion = self.criterion.cuda()
 
-        # Load pre-trained model
-        if load_snapshot:
-            self.model.load_state_dict(torch.load(snapshot_file))
-            print('Pre-trained model snapshot loaded from: %s' % (snapshot_file))
-
-        # Convert model from CPU to GPU
-        if self.use_cuda:
-            self.model = self.model.cuda()
-
-        # Set model to training mode
-        self.model.train()
-
-        # Initialize optimizer
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1e-4, momentum=0.9, weight_decay=2e-5)
         self.iteration = 0
-
         # Initialize lists to save execution info and RL variables
         self.executed_action_log = []
         self.label_value_log = []
         self.reward_value_log = []
         self.predicted_value_log = []
-        self.clearance_log = []
-        self.is_exploit_log = []
 
     # Preload execution info and RL variables
     def preload(self, transitions_directory):
@@ -115,9 +92,6 @@ class Trainer(object):
         self.reward_value_log = self.reward_value_log[0:self.iteration]
         self.reward_value_log.shape = (self.iteration, 1)
         self.reward_value_log = self.reward_value_log.tolist()
-        self.clearance_log = np.loadtxt(os.path.join(transitions_directory, 'clearance.log.txt'), delimiter=' ')
-        self.clearance_log.shape = (self.clearance_log.shape[0], 1)
-        self.clearance_log = self.clearance_log.tolist()
 
     # Compute forward pass through model to compute affordances/Q
     def forward(self, color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=-1):
@@ -198,7 +172,49 @@ class MultiQTrainer(Trainer):
     def __init__(self, future_reward_discount, load_snapshot, snapshot_file, force_cpu):  # , snapshot=None
         super(MultiQTrainer, self).__init__(future_reward_discount, load_snapshot, snapshot_file, force_cpu)
 
-        self.model = MultiQNet(use_cuda=self.use_cuda)
+        self.grasp_mode_count = [0, 0]
+
+        # Fully convolutional network
+        self.model = StudentNet(use_cuda=self.use_cuda)
+        self.future_reward_discount = future_reward_discount
+
+        # Load pre-trained model
+        if load_snapshot:
+            self.model.load_state_dict(torch.load(snapshot_file))
+            print('Pre-trained model snapshot loaded from: %s' % snapshot_file)
+
+        # Convert model from CPU to GPU
+        if self.use_cuda:
+            self.model = self.model.cuda()
+
+        # Set model to training mode
+        self.model.train()
+
+        # Initialize optimizer
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1e-4, momentum=0.9, weight_decay=2e-5)
+
+    def preload(self, transitions_directory):
+        self.executed_action_log = np.loadtxt(os.path.join(transitions_directory, 'executed-action.log.txt'),
+                                              delimiter=' ')
+        self.iteration = self.executed_action_log.shape[0] - 2
+        self.executed_action_log = self.executed_action_log[0:self.iteration, :]
+        self.executed_action_log = self.executed_action_log.tolist()
+        self.grasp_mode_count[0] = np.count_nonzero(np.array(self.executed_action_log)[:, 0] == 1)
+        self.grasp_mode_count[1] = np.count_nonzero(np.array(self.executed_action_log)[:, 0] == 1)
+
+        self.label_value_log = np.loadtxt(os.path.join(transitions_directory, 'label-value.log.txt'), delimiter=' ')
+        self.label_value_log = self.label_value_log[0:self.iteration]
+        self.label_value_log.shape = (self.iteration, 1)
+        self.label_value_log = self.label_value_log.tolist()
+        self.predicted_value_log = np.loadtxt(os.path.join(transitions_directory, 'predicted-value.log.txt'),
+                                              delimiter=' ')
+        self.predicted_value_log = self.predicted_value_log[0:self.iteration]
+        self.predicted_value_log.shape = (self.iteration, 1)
+        self.predicted_value_log = self.predicted_value_log.tolist()
+        self.reward_value_log = np.loadtxt(os.path.join(transitions_directory, 'reward-value.log.txt'), delimiter=' ')
+        self.reward_value_log = self.reward_value_log[0:self.iteration]
+        self.reward_value_log.shape = (self.iteration, 1)
+        self.reward_value_log = self.reward_value_log.tolist()
 
     def get_label_value(self, grasp_success, next_color_heightmap, next_depth_heightmap):
 
@@ -350,10 +366,146 @@ class MultiQTrainer(Trainer):
 
         print('Training loss: %f' % loss_value)
         self.optimizer.step()
+        return loss_value
 
 
-class MultiQTrainer(Trainer):
+class HybridTrainer(Trainer):
     def __init__(self, future_reward_discount, load_snapshot, snapshot_file, force_cpu):  # , snapshot=None
-        super(MultiQTrainer, self).__init__(future_reward_discount, load_snapshot, snapshot_file, force_cpu)
+        super(HybridTrainer, self).__init__(future_reward_discount, load_snapshot, snapshot_file, force_cpu)
 
-        self.model = MultiQNet(use_cuda=self.use_cuda)
+        # Fully convolutional network
+        self.model = HybridNet(use_cuda=self.use_cuda)
+        self.future_reward_discount = future_reward_discount
+
+        # Load pre-trained model
+        if load_snapshot:
+            self.model.load_state_dict(torch.load(snapshot_file))
+            print('Pre-trained model snapshot loaded from: %s' % snapshot_file)
+
+        # Convert model from CPU to GPU
+        if self.use_cuda:
+            self.model = self.model.cuda()
+
+        # Set model to training mode
+        self.model.train()
+
+        # Initialize optimizer
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1e-4, momentum=0.9, weight_decay=2e-5)
+
+    def get_label_value(self, grasp_success, next_color_heightmap, next_depth_heightmap):
+        # Compute current reward
+        current_reward = grasp_success
+
+        # Compute future reward
+        if not grasp_success:
+            future_reward = 0
+        else:
+            _, next_grasp_predictions, next_state_feat = self.forward(next_color_heightmap,
+                                                                      next_depth_heightmap,
+                                                                      is_volatile=True)
+            future_reward = np.max(next_grasp_predictions)
+
+            # # Experiment: use Q differences
+            # push_predictions_difference = next_push_predictions - prev_push_predictions
+            # grasp_predictions_difference = next_grasp_predictions - prev_grasp_predictions
+            # future_reward = max(np.max(push_predictions_difference), np.max(grasp_predictions_difference))
+
+        print('Current reward: %f' % current_reward)
+        print('Future reward: %f' % future_reward)
+        expected_reward = current_reward + self.future_reward_discount * future_reward
+        print('Expected reward: %f + %f x %f = %f' % (
+            current_reward, self.future_reward_discount, future_reward, expected_reward))
+        return expected_reward, current_reward
+
+    # Compute labels and backpropagation
+
+    def backprop(self, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_config):
+
+        action_area = np.zeros((224, 224))
+        action_area[best_pix_ind[1]][best_pix_ind[2]] = 1
+        # blur_kernel = np.ones((5,5),np.float32)/25
+        # action_area = cv2.filter2D(action_area, -1, blur_kernel)
+
+        # Compute labels for grasp quality
+        label_q = np.zeros((1, 320, 320))
+        tmp_label = np.zeros((224, 224))
+        tmp_label[action_area > 0] = label_value
+        label_q[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label
+
+        # Compute quality mask
+        label_weights = np.zeros((1, 320, 320))
+        tmp_label_weights = np.zeros((224, 224))
+        tmp_label_weights[action_area > 0] = 1
+        label_weights[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label_weights
+
+        config_area_size = 10
+        config_area = np.zeros((224, 224))
+        config_area[best_pix_ind[1] - config_area_size:best_pix_ind[1] + config_area_size,
+        best_pix_ind[2] - config_area_size:best_pix_ind[2] + config_area_size] = 1
+
+        # Compute labels for grasp primitive
+        label_config = np.zeros((1, 320, 320))
+        tmp_label = np.zeros((224, 224))
+        tmp_label[config_area > 0] = grasp_config
+        label_config[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label
+
+        # Compute config mask
+        config_mask = np.zeros((1, 320, 320))
+        tmp_config_mask = np.zeros((224, 224))
+        tmp_label[config_area > 0] = 1
+        config_mask[0, 48:(320 - 48), 48:(320 - 48)] = tmp_config_mask
+
+        # Compute loss and backward pass
+        self.optimizer.zero_grad()
+        loss_value = 0
+
+        if label_value > 0:  # When successful, compute both quality and config loss
+
+            # Do forward pass with specified rotation (to save gradients)
+            config_predictions, grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap,
+                                                                             is_volatile=False,
+                                                                             specific_rotation=best_pix_ind[0])
+            if self.use_cuda:
+                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320) * Variable(
+                    torch.from_numpy(config_mask).float().cuda(), requires_grad=False),
+                                             Variable(torch.from_numpy(label_config).float().cuda())) * Variable(
+                    torch.from_numpy(config_mask).float().cuda(), requires_grad=False)
+                loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+                                        Variable(torch.from_numpy(label_q).float().cuda())) * Variable(
+                    torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+            else:
+                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320) * Variable(
+                    torch.from_numpy(config_mask).float(), requires_grad=False),
+                                             Variable(torch.from_numpy(label_config).float())) * Variable(
+                    torch.from_numpy(config_mask).float(), requires_grad=False)
+                loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+                                        Variable(torch.from_numpy(label_q).float())) * Variable(
+                    torch.from_numpy(label_weights).float(), requires_grad=False)
+            loss = loss_q.sum() + loss_config.sum()
+            loss.backward()
+            loss_value = loss.cpu().data.numpy()
+
+            print('Training loss: %f' % loss_value)
+            self.optimizer.step()
+
+        else:  # Only implement backpropagation on q net
+
+            # Do forward pass with specified rotation (to save gradients)
+            config_predictions, grasp_predictions, state_feat = self.forward(color_heightmap, depth_heightmap,
+                                                                             is_volatile=False,
+                                                                             specific_rotation=best_pix_ind[0])
+            if self.use_cuda:
+                loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+                                        Variable(torch.from_numpy(label_q).float().cuda())) * Variable(
+                    torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+            else:
+                loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+                                        Variable(torch.from_numpy(label_q).float())) * Variable(
+                    torch.from_numpy(label_weights).float(), requires_grad=False)
+            loss = loss_q.sum()
+            loss.backward()
+            loss_value = loss.cpu().data.numpy()
+
+            print('Training loss: %f' % loss_value)
+            self.optimizer.step()
+            return loss_value

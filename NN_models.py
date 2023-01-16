@@ -186,45 +186,13 @@ class MultiQNet(nn.Module):
     def __init__(self, use_cuda):  # , snapshot=None
         super(MultiQNet, self).__init__()
         self.use_cuda = use_cuda
-
-        # Initialize network trunks with DenseNet pre-trained on ImageNet
-        self.grasp_color_trunk = None
-        self.grasp_depth_trunk = None
-        self.feature_dim = None  # depends on the output of feature extraction trunk
-
         self.num_rotations = 18
-
-        # Construct multiple network branches for grasping (Quality Map)
-        self.graspnet_1 = nn.Sequential(OrderedDict([
-            ('grasp_1-norm0', nn.BatchNorm2d(self.feature_dim)),
-            ('grasp_1-relu0', nn.ReLU(inplace=True)),
-            ('grasp_1-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
-            ('grasp_1-norm1', nn.BatchNorm2d(64)),
-            ('grasp_1-relu1', nn.ReLU(inplace=True)),
-            ('grasp_1-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False))
-        ]))
-
-        self.graspnet_2 = nn.Sequential(OrderedDict([
-            ('grasp_2-norm0', nn.BatchNorm2d(2048)),
-            ('grasp_2-relu0', nn.ReLU(inplace=True)),
-            ('grasp_2-conv0', nn.Conv2d(2048, 64, kernel_size=1, stride=1, bias=False)),
-            ('grasp_2-norm1', nn.BatchNorm2d(64)),
-            ('grasp_2-relu1', nn.ReLU(inplace=True)),
-            ('grasp_2-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False)),
-        ]))
-
-        # Initialize network weights
-        for m in self.named_modules():
-            if 'grasp_' in m[0]:
-                if isinstance(m[1], nn.Conv2d):
-                    nn.init.kaiming_normal(m[1].weight.data)
-                elif isinstance(m[1], nn.BatchNorm2d):
-                    m[1].weight.data.fill_(1)
-                    m[1].bias.data.zero_()
-
         # Initialize output variable (for backprop)
         self.interm_feat = []
         self.output_prob = []
+
+        self.grasp_color_trunk_features = None
+        self.grasp_depth_trunk_features = None
 
     def forward(self, input_color_data, input_depth_data, is_volatile=False, specific_rotation=-1):
 
@@ -262,8 +230,8 @@ class MultiQNet(nn.Module):
                                                      mode='nearest')
 
                     # Compute intermediate features
-                    interm_grasp_color_feat = self.grasp_color_trunk.features(rotate_color)
-                    interm_grasp_depth_feat = self.grasp_depth_trunk.features(rotate_depth)
+                    interm_grasp_color_feat = self.grasp_color_trunk_features(rotate_color)
+                    interm_grasp_depth_feat = self.grasp_depth_trunk_features(rotate_depth)
                     interm_grasp_feat = torch.cat((interm_grasp_color_feat, interm_grasp_depth_feat), dim=1)
                     interm_feat.append([interm_grasp_feat])
 
@@ -324,8 +292,8 @@ class MultiQNet(nn.Module):
                                              mode='nearest')
 
             # Compute intermediate features
-            interm_grasp_color_feat = self.grasp_color_trunk.features(rotate_color)
-            interm_grasp_depth_feat = self.grasp_depth_trunk.features(rotate_depth)
+            interm_grasp_color_feat = self.grasp_color_trunk_features(rotate_color)
+            interm_grasp_depth_feat = self.grasp_depth_trunk_features(rotate_depth)
             interm_grasp_feat = torch.cat((interm_grasp_color_feat, interm_grasp_depth_feat), dim=1)
             self.interm_feat.append([interm_grasp_feat])
 
@@ -358,8 +326,38 @@ class TeacherNet(MultiQNet):
         # Initialize network trunks with DenseNet pre-trained on ImageNet
         self.grasp_color_trunk = torchvision.models.densenet.densenet121(pretrained=True)
         self.grasp_depth_trunk = torchvision.models.densenet.densenet121(pretrained=True)
+        self.grasp_color_trunk_features = self.grasp_color_trunk.features
+        self.grasp_depth_trunk_features = self.grasp_color_trunk.features
 
         self.feature_dim = 2048
+
+        # Construct multiple network branches for grasping (Quality Map)
+        self.graspnet_1 = nn.Sequential(OrderedDict([
+            ('grasp_1-norm0', nn.BatchNorm2d(self.feature_dim)),
+            ('grasp_1-relu0', nn.ReLU(inplace=True)),
+            ('grasp_1-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
+            ('grasp_1-norm1', nn.BatchNorm2d(64)),
+            ('grasp_1-relu1', nn.ReLU(inplace=True)),
+            ('grasp_1-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False))
+        ]))
+
+        self.graspnet_2 = nn.Sequential(OrderedDict([
+            ('grasp_2-norm0', nn.BatchNorm2d(self.feature_dim)),
+            ('grasp_2-relu0', nn.ReLU(inplace=True)),
+            ('grasp_2-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
+            ('grasp_2-norm1', nn.BatchNorm2d(64)),
+            ('grasp_2-relu1', nn.ReLU(inplace=True)),
+            ('grasp_2-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False)),
+        ]))
+
+        # Initialize network weights
+        for m in self.named_modules():
+            if 'grasp_' in m[0]:
+                if isinstance(m[1], nn.Conv2d):
+                    nn.init.kaiming_normal(m[1].weight.data)
+                elif isinstance(m[1], nn.BatchNorm2d):
+                    m[1].weight.data.fill_(1)
+                    m[1].bias.data.zero_()
 
 
 class StudentNet(MultiQNet):
@@ -367,9 +365,38 @@ class StudentNet(MultiQNet):
         super(StudentNet, self).__init__(use_cuda)
 
         # Initialize network trunks with DenseNet pre-trained on ImageNet
-        res_model = torchvision.models.resnet50(pretrained=True)
+        res_model = torchvision.models.resnet18(pretrained=True)
 
-        self.grasp_color_trunk = torch.nn.Sequential(*list(res_model.children())[:-2])
-        self.grasp_depth_trunk = torch.nn.Sequential(*list(res_model.children())[:-2])
+        self.grasp_color_trunk_features = torch.nn.Sequential(*list(res_model.children())[:-2])
+        self.grasp_depth_trunk_features = torch.nn.Sequential(*list(res_model.children())[:-2])
 
-        self.feature_dim = 4096
+        self.feature_dim = 1024  # for ResNet-18
+        # self.feature_dim = 4096  # for ResNet-50
+
+        # Construct multiple network branches for grasping (Quality Map)
+        self.graspnet_1 = nn.Sequential(OrderedDict([
+            ('grasp_1-norm0', nn.BatchNorm2d(self.feature_dim)),
+            ('grasp_1-relu0', nn.ReLU(inplace=True)),
+            ('grasp_1-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
+            ('grasp_1-norm1', nn.BatchNorm2d(64)),
+            ('grasp_1-relu1', nn.ReLU(inplace=True)),
+            ('grasp_1-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False))
+        ]))
+
+        self.graspnet_2 = nn.Sequential(OrderedDict([
+            ('grasp_2-norm0', nn.BatchNorm2d(self.feature_dim)),
+            ('grasp_2-relu0', nn.ReLU(inplace=True)),
+            ('grasp_2-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
+            ('grasp_2-norm1', nn.BatchNorm2d(64)),
+            ('grasp_2-relu1', nn.ReLU(inplace=True)),
+            ('grasp_2-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False)),
+        ]))
+
+        # Initialize network weights
+        for m in self.named_modules():
+            if 'grasp_' in m[0]:
+                if isinstance(m[1], nn.Conv2d):
+                    nn.init.kaiming_normal(m[1].weight.data)
+                elif isinstance(m[1], nn.BatchNorm2d):
+                    m[1].weight.data.fill_(1)
+                    m[1].bias.data.zero_()
