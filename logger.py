@@ -14,7 +14,6 @@ class Logger:
         # Create directory to save data
         timestamp = time.time()
         timestamp_value = datetime.datetime.fromtimestamp(timestamp)
-        self.writer = SummaryWriter()
         self.continue_logging = continue_logging
         if self.continue_logging:
             self.base_directory = logging_directory
@@ -31,6 +30,7 @@ class Logger:
         self.visualizations_directory = os.path.join(self.base_directory, 'visualizations')
         self.transitions_directory = os.path.join(self.base_directory, 'transitions')
         self.tensorboard_directory = os.path.join(self.base_directory, 'logs_dir')
+        self.writer = SummaryWriter(log_dir=self.tensorboard_directory)
 
         if not os.path.exists(self.info_directory):
             os.makedirs(self.info_directory)

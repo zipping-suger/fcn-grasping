@@ -2,9 +2,13 @@ from collections import OrderedDict
 import torchvision
 import numpy as np
 import torch
+import time
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+import torch.multiprocessing as mp
+
+mp = mp.get_context('spawn')
 
 
 # HybridNet predict both grasping quality and grasping configuration
@@ -186,7 +190,7 @@ class MultiQNet(nn.Module):
     def __init__(self, use_cuda):  # , snapshot=None
         super(MultiQNet, self).__init__()
         self.use_cuda = use_cuda
-        self.num_rotations = 18
+        self.num_rotations = 12
         # Initialize output variable (for backprop)
         self.interm_feat = []
         self.output_prob = []
@@ -219,9 +223,11 @@ class MultiQNet(nn.Module):
 
                     # Rotate images clockwise
                     if self.use_cuda:
-                        rotate_color = F.grid_sample(Variable(input_color_data, volatile=True).cuda(), flow_grid_before,
+                        rotate_color = F.grid_sample(Variable(input_color_data, volatile=True).cuda(),
+                                                     flow_grid_before,
                                                      mode='nearest')
-                        rotate_depth = F.grid_sample(Variable(input_depth_data, volatile=True).cuda(), flow_grid_before,
+                        rotate_depth = F.grid_sample(Variable(input_depth_data, volatile=True).cuda(),
+                                                     flow_grid_before,
                                                      mode='nearest')
                     else:
                         rotate_color = F.grid_sample(Variable(input_color_data, volatile=True), flow_grid_before,
@@ -230,6 +236,7 @@ class MultiQNet(nn.Module):
                                                      mode='nearest')
 
                     # Compute intermediate features
+
                     interm_grasp_color_feat = self.grasp_color_trunk_features(rotate_color)
                     interm_grasp_depth_feat = self.grasp_depth_trunk_features(rotate_depth)
                     interm_grasp_feat = torch.cat((interm_grasp_color_feat, interm_grasp_depth_feat), dim=1)
@@ -255,7 +262,6 @@ class MultiQNet(nn.Module):
                         nn.Upsample(scale_factor=16, mode='bilinear').forward(
                             F.grid_sample(self.graspnet_2(interm_grasp_feat), flow_grid_after,
                                           mode='nearest'))])
-
             return output_prob, interm_feat
 
         else:
@@ -269,7 +275,8 @@ class MultiQNet(nn.Module):
 
             # Compute sample grid for rotation BEFORE branches
             affine_mat_before = np.asarray(
-                [[np.cos(-rotate_theta), np.sin(-rotate_theta), 0], [-np.sin(-rotate_theta), np.cos(-rotate_theta), 0]])
+                [[np.cos(-rotate_theta), np.sin(-rotate_theta), 0],
+                 [-np.sin(-rotate_theta), np.cos(-rotate_theta), 0]])
             affine_mat_before.shape = (2, 3, 1)
             affine_mat_before = torch.from_numpy(affine_mat_before).permute(2, 0, 1).float()
             if self.use_cuda:
@@ -281,9 +288,11 @@ class MultiQNet(nn.Module):
 
             # Rotate images clockwise
             if self.use_cuda:
-                rotate_color = F.grid_sample(Variable(input_color_data, requires_grad=False).cuda(), flow_grid_before,
+                rotate_color = F.grid_sample(Variable(input_color_data, requires_grad=False).cuda(),
+                                             flow_grid_before,
                                              mode='nearest')
-                rotate_depth = F.grid_sample(Variable(input_depth_data, requires_grad=False).cuda(), flow_grid_before,
+                rotate_depth = F.grid_sample(Variable(input_depth_data, requires_grad=False).cuda(),
+                                             flow_grid_before,
                                              mode='nearest')
             else:
                 rotate_color = F.grid_sample(Variable(input_color_data, requires_grad=False), flow_grid_before,
@@ -324,12 +333,12 @@ class TeacherNet(MultiQNet):
         super(TeacherNet, self).__init__(use_cuda)
 
         # Initialize network trunks with DenseNet pre-trained on ImageNet
-        self.grasp_color_trunk = torchvision.models.densenet.densenet121(pretrained=True)
-        self.grasp_depth_trunk = torchvision.models.densenet.densenet121(pretrained=True)
+        self.grasp_color_trunk = torchvision.models.densenet.densenet161(pretrained=False)
+        self.grasp_depth_trunk = torchvision.models.densenet.densenet161(pretrained=False)
         self.grasp_color_trunk_features = self.grasp_color_trunk.features
         self.grasp_depth_trunk_features = self.grasp_color_trunk.features
 
-        self.feature_dim = 2048
+        self.feature_dim = 4416
 
         # Construct multiple network branches for grasping (Quality Map)
         self.graspnet_1 = nn.Sequential(OrderedDict([
