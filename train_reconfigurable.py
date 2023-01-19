@@ -11,6 +11,7 @@ from logger import Logger
 import utils
 import threading
 import warnings
+
 warnings.filterwarnings('ignore')  # CAREFULL!!! Supress all warnings
 
 
@@ -109,11 +110,11 @@ def main(args):
                 # Visualize executed primitive, and affordances
                 if save_visualizations:
                     config_pred_vis = get_prediction_vis(config_predictions, color_heightmap,
-                                                                 nonlocal_variables['best_pix_ind'])
+                                                         nonlocal_variables['best_pix_ind'])
                     logger.save_visualizations(trainer.iteration, config_pred_vis, 'config')
                     cv2.imwrite('visualization.config.png', config_pred_vis)
                     grasp_pred_vis = get_prediction_vis(grasp_predictions, color_heightmap,
-                                                                nonlocal_variables['best_pix_ind'])
+                                                        nonlocal_variables['best_pix_ind'])
                     logger.save_visualizations(trainer.iteration, grasp_pred_vis, 'grasp')
                     cv2.imwrite('visualization.grasp.png', grasp_pred_vis)
 
@@ -123,7 +124,7 @@ def main(args):
                 if primitive_position[2] < 0.2:
                     # Execute primitive
                     nonlocal_variables['grasp_success'] = robot.grasp(primitive_position, best_rotation_angle,
-                                                                      (np.pi / 2 * primitive_config) - np.pi / 2,
+                                                                      (np.pi / 3 * primitive_config) - np.pi / 2,
                                                                       workspace_limits)
                     print('Grasp successful: %r' % (nonlocal_variables['grasp_success']))
 
@@ -223,8 +224,12 @@ def main(args):
             logger.write_to_log('reward-value', trainer.reward_value_log)
 
             # Backpropagate
-            trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_best_pix_ind,
-                             label_value, prev_best_config)
+            loss_q_value, loss_config_value = trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap,
+                                                               prev_best_pix_ind,
+                                                               label_value, prev_best_config)
+
+            logger.writer.add_scalar('q_loss', loss_q_value, trainer.iteration)
+            logger.writer.add_scalar('config_loss', loss_config_value, trainer.iteration)
 
             # Save model snapshot
             logger.save_backup_model(trainer.model, 'reconfig')
@@ -253,6 +258,7 @@ def main(args):
         trainer.iteration += 1
         iteration_time_1 = time.time()
         print('Time elapsed: %f' % (iteration_time_1 - iteration_time_0))
+
 
 if __name__ == '__main__':
     # Parse arguments

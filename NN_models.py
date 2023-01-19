@@ -6,9 +6,6 @@ import time
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-import torch.multiprocessing as mp
-
-mp = mp.get_context('spawn')
 
 
 # HybridNet predict both grasping quality and grasping configuration
@@ -19,16 +16,18 @@ class HybridNet(nn.Module):
         self.use_cuda = use_cuda
 
         # Initialize network trunks with DenseNet pre-trained on ImageNet
-        self.grasp_color_trunk = torchvision.models.densenet.densenet121(pretrained=True)
-        self.grasp_depth_trunk = torchvision.models.densenet.densenet121(pretrained=True)
+        self.grasp_color_trunk = torchvision.models.densenet.densenet161(pretrained=False)
+        self.grasp_depth_trunk = torchvision.models.densenet.densenet161(pretrained=False)
+
+        self.feature_dim = 4416
 
         self.num_rotations = 16
 
         # Construct network branches for grasping (Quality Map)
         self.graspnet = nn.Sequential(OrderedDict([
-            ('grasp-norm0', nn.BatchNorm2d(2048)),
+            ('grasp-norm0', nn.BatchNorm2d(self.feature_dim)),
             ('grasp-relu0', nn.ReLU(inplace=True)),
-            ('grasp-conv0', nn.Conv2d(2048, 64, kernel_size=1, stride=1, bias=False)),
+            ('grasp-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
             ('grasp-norm1', nn.BatchNorm2d(64)),
             ('grasp-relu1', nn.ReLU(inplace=True)),
             ('grasp-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False))
@@ -36,9 +35,9 @@ class HybridNet(nn.Module):
 
         # Construct network branches for grasping (Configuration Map)
         self.confignet = nn.Sequential(OrderedDict([
-            ('config-norm0', nn.BatchNorm2d(2048)),
+            ('config-norm0', nn.BatchNorm2d(self.feature_dim)),
             ('config-relu0', nn.ReLU(inplace=True)),
-            ('config-conv0', nn.Conv2d(2048, 64, kernel_size=1, stride=1, bias=False)),
+            ('config-conv0', nn.Conv2d(self.feature_dim, 64, kernel_size=1, stride=1, bias=False)),
             ('config-norm1', nn.BatchNorm2d(64)),
             ('config-relu1', nn.ReLU(inplace=True)),
             ('config-conv1', nn.Conv2d(64, 1, kernel_size=1, stride=1, bias=False)),

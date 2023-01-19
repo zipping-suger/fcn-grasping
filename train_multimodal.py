@@ -11,6 +11,7 @@ from logger import Logger
 import utils
 import threading
 import warnings
+
 warnings.filterwarnings('ignore')  # CAREFULL!!! Supress all warnings
 
 
@@ -31,6 +32,7 @@ def main(args):
     gripper_type = 'barrett'
 
     # ------------- Algorithm options -------------
+    network_type = args.network_type
     future_reward_discount = args.future_reward_discount
     experience_replay = args.experience_replay  # Use prioritized experience replay?
 
@@ -48,7 +50,7 @@ def main(args):
     robot = Robot(is_sim, obj_mesh_dir, num_obj, workspace_limits, gripper_type)
 
     # Initialize trainer
-    trainer = MultiQTrainer(future_reward_discount, load_snapshot, snapshot_file, force_cpu)
+    trainer = MultiQTrainer(network_type, future_reward_discount, load_snapshot, snapshot_file, force_cpu)
 
     # Initialize data logger
     logger = Logger(continue_logging, logging_directory)
@@ -121,11 +123,11 @@ def main(args):
                 # Visualize executed primitive, and affordances
                 if save_visualizations:
                     grasp_1_pred_vis = get_prediction_vis(grasp_1_predictions, color_heightmap,
-                                                                  nonlocal_variables['best_pix_ind'])
+                                                          nonlocal_variables['best_pix_ind'])
                     logger.save_visualizations(trainer.iteration, grasp_1_pred_vis, 'grasp_1')
                     cv2.imwrite('visualization.grasp_1.png', grasp_1_pred_vis)
                     grasp_2_pred_vis = get_prediction_vis(grasp_2_predictions, color_heightmap,
-                                                                  nonlocal_variables['best_pix_ind'])
+                                                          nonlocal_variables['best_pix_ind'])
                     logger.save_visualizations(trainer.iteration, grasp_2_pred_vis, 'grasp_2')
                     cv2.imwrite('visualization.grasp_2.png', grasp_2_pred_vis)
 
@@ -252,8 +254,9 @@ def main(args):
             grasp_type = 1 if nonlocal_variables['primitive_action'] == 'grasp_1' else 2
 
             # Backpropagate
-            loss_value = trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_best_pix_ind, label_value,
-                             grasp_type)
+            loss_value = trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_best_pix_ind,
+                                          label_value,
+                                          grasp_type)
             logger.writer.add_scalar('loss', loss_value, trainer.iteration)
 
             # Do sampling for experience replay
@@ -374,6 +377,8 @@ if __name__ == '__main__':
                         help='force code to run in CPU mode')
 
     # ------------- Algorithm options -------------
+    parser.add_argument('--network', dest='network_type', action='store',
+                        default='student')
     parser.add_argument('--future_reward_discount', dest='future_reward_discount', type=float, action='store',
                         default=0)
     parser.add_argument('--experience_replay', dest='experience_replay', action='store_true', default=True,

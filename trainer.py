@@ -251,12 +251,11 @@ class HybridTrainer(Trainer):
         # Compute config mask
         config_mask = np.zeros((1, 320, 320))
         tmp_config_mask = np.zeros((224, 224))
-        tmp_label[config_area > 0] = 1
+        tmp_config_mask[config_area > 0] = 1
         config_mask[0, 48:(320 - 48), 48:(320 - 48)] = tmp_config_mask
 
         # Compute loss and backward pass
         self.optimizer.zero_grad()
-        loss_value = 0
 
         if label_value > 0:  # When successful, compute both quality and config loss
 
@@ -282,9 +281,10 @@ class HybridTrainer(Trainer):
                     torch.from_numpy(label_weights).float(), requires_grad=False)
             loss = loss_q.sum() + loss_config.sum()
             loss.backward()
-            loss_value = loss.cpu().data.numpy()
+            loss_q_value = loss_q.sum().cpu().data.numpy()
+            loss_config_value = loss_config.sum().cpu().data.numpy()
 
-            print('Training loss: %f' % loss_value)
+            print('Q loss: %f;' % loss_q_value, 'config loss: %f;' % loss_config_value)
             self.optimizer.step()
 
         else:  # Only implement backpropagation on q net
@@ -303,21 +303,27 @@ class HybridTrainer(Trainer):
                     torch.from_numpy(label_weights).float(), requires_grad=False)
             loss = loss_q.sum()
             loss.backward()
-            loss_value = loss.cpu().data.numpy()
-
-            print('Training loss: %f' % loss_value)
+            loss_q_value = loss_q.sum().cpu().data.numpy()
+            loss_config_value = 0
+            print('Q loss: %f' % loss_q_value)
             self.optimizer.step()
-            return loss_value
+        return loss_q_value, loss_config_value
 
 
 class MultiQTrainer(Trainer):
-    def __init__(self, future_reward_discount, load_snapshot, snapshot_file, force_cpu):  # , snapshot=None
+    def __init__(self, network_type, future_reward_discount, load_snapshot, snapshot_file, force_cpu):  # , snapshot=None
         super(MultiQTrainer, self).__init__(force_cpu)
 
         self.grasp_mode_count = [0, 0]
 
         # Fully convolutional network
-        self.model = TeacherNet(use_cuda=self.use_cuda)
+        if network_type == 'teacher':
+            self.model = TeacherNet(use_cuda=self.use_cuda)
+        elif network_type == 'student':
+            self.model = StudentNet(use_cuda=self.use_cuda)
+        else:
+            raise ValueError("Network type error")
+
         self.future_reward_discount = future_reward_discount
 
         # Load pre-trained model
