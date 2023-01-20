@@ -100,6 +100,7 @@ def main(args):
                                       best_pix_y * heightmap_resolution + workspace_limits[1][0],
                                       valid_depth_heightmap[best_pix_y][best_pix_x] + workspace_limits[2][0]]
                 primitive_config = nonlocal_variables['best_gripper_config']
+                assert -1 < primitive_config < 1  # range (-1,1)
 
                 # Save executed primitive
                 trainer.executed_action_log.append(
@@ -124,7 +125,7 @@ def main(args):
                 if primitive_position[2] < 0.2:
                     # Execute primitive
                     nonlocal_variables['grasp_success'] = robot.grasp(primitive_position, best_rotation_angle,
-                                                                      (np.pi / 3 * primitive_config) - np.pi / 2,
+                                                                      (np.pi / 6 * primitive_config) - np.pi / 3,
                                                                       workspace_limits)
                     print('Grasp successful: %r' % (nonlocal_variables['grasp_success']))
 
