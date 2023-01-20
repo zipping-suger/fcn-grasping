@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import torch
 from torch.autograd import Variable
-from NN_models import TeacherNet, StudentNet, HybridNet
+from NN_models import TeacherNet, StudentNet, HybridNet, HybridNet2
 from scipy import ndimage
 
 
@@ -173,7 +173,7 @@ class HybridTrainer(Trainer):
         super(HybridTrainer, self).__init__(force_cpu)
 
         # Fully convolutional network
-        self.model = HybridNet(use_cuda=self.use_cuda)
+        self.model = HybridNet2(use_cuda=self.use_cuda)
         self.future_reward_discount = future_reward_discount
 
         # Load pre-trained model
@@ -237,7 +237,7 @@ class HybridTrainer(Trainer):
         tmp_label_weights[action_area > 0] = 1
         label_weights[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label_weights
 
-        config_area_size = 10
+        config_area_size = 1
         config_area = np.zeros((224, 224))
         config_area[best_pix_ind[1] - config_area_size:best_pix_ind[1] + config_area_size,
         best_pix_ind[2] - config_area_size:best_pix_ind[2] + config_area_size] = 1
@@ -253,6 +253,10 @@ class HybridTrainer(Trainer):
         tmp_config_mask = np.zeros((224, 224))
         tmp_config_mask[config_area > 0] = 1
         config_mask[0, 48:(320 - 48), 48:(320 - 48)] = tmp_config_mask
+
+        # Test
+        label_q[config_mask > 0] = label_value
+        label_weights = config_mask
 
         # Compute loss and backward pass
         self.optimizer.zero_grad()
@@ -311,7 +315,8 @@ class HybridTrainer(Trainer):
 
 
 class MultiQTrainer(Trainer):
-    def __init__(self, network_type, future_reward_discount, load_snapshot, snapshot_file, force_cpu):  # , snapshot=None
+    def __init__(self, network_type, future_reward_discount, load_snapshot, snapshot_file,
+                 force_cpu):  # , snapshot=None
         super(MultiQTrainer, self).__init__(force_cpu)
 
         self.grasp_mode_count = [0, 0]
@@ -636,7 +641,8 @@ class TSTrainer(Trainer):
             # Compute quality after rotating 120 degree
             one_third_rotate_idx = (best_pix_ind[0] + self.model.num_rotations / 3) % self.model.num_rotations
 
-            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap, depth_heightmap,
+            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+                                                                                   depth_heightmap,
                                                                                    is_volatile=False,
                                                                                    specific_rotation=one_third_rotate_idx)
 
@@ -656,9 +662,10 @@ class TSTrainer(Trainer):
             # Compute grasping quality after rotating 240 degree
             sixty_rotate_idx = (best_pix_ind[0] + self.model.num_rotations * 2 / 3) % self.model.num_rotations
 
-            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap, depth_heightmap,
-                                                                                is_volatile=False,
-                                                                                specific_rotation=sixty_rotate_idx)
+            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+                                                                                   depth_heightmap,
+                                                                                   is_volatile=False,
+                                                                                   specific_rotation=sixty_rotate_idx)
 
             if self.use_cuda:
                 loss = self.criterion(self.model.output_prob[0][0].view(1, 320, 320),
@@ -678,9 +685,10 @@ class TSTrainer(Trainer):
         elif grasp_type == 2:
 
             # Do ts_forward pass with specified rotation (to save gradients)
-            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap, depth_heightmap,
-                                                                                is_volatile=False,
-                                                                                specific_rotation=best_pix_ind[0])
+            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+                                                                                   depth_heightmap,
+                                                                                   is_volatile=False,
+                                                                                   specific_rotation=best_pix_ind[0])
 
             if self.use_cuda:
                 loss = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
@@ -697,9 +705,10 @@ class TSTrainer(Trainer):
             # Compute grasping quality after rotating 180 degree
             opposite_rotate_idx = (best_pix_ind[0] + self.model.num_rotations / 2) % self.model.num_rotations
 
-            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap, depth_heightmap,
-                                                                                is_volatile=False,
-                                                                                specific_rotation=opposite_rotate_idx)
+            grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+                                                                                   depth_heightmap,
+                                                                                   is_volatile=False,
+                                                                                   specific_rotation=opposite_rotate_idx)
 
             if self.use_cuda:
                 loss = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
