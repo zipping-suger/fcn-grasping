@@ -14,14 +14,17 @@ def check_legal(best_pix):
 
 if __name__ == '__main__':
     # Annotation data directory
-    data_dir = 'manual_data/YCB_sim/height_map'
+    data_dir = 'Train/heightmaps'
     annotated_log_dir = data_dir + '_log'
     aug_annotated_log_dir = data_dir + '_log_aug'
+
+    if not os.path.exists(aug_annotated_log_dir):
+        os.makedirs(aug_annotated_log_dir)
 
     data_size = len(os.listdir(data_dir))
     print("Total data size:", data_size, "\n")
 
-    success_multiple = 4
+    success_multiple = 6
     fail_multiple = 3
 
     success_counter = 0

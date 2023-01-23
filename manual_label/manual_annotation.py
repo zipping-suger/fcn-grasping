@@ -47,9 +47,9 @@ def click_event(event, x, y, flags, params):
         rotation_index = int(input("Input principle rotation_index\n")) % 16
 
         rotate_theta = np.radians(rotation_index * (360 / num_rotations))
-        if hand_config_index == 1:
+        if hand_config_index == 2:
             plot_line(np.array([x, y]), rotate_theta, line_length, color=(0, 255, 255))
-        elif hand_config_index == 2:
+        elif hand_config_index == 1:
             plot_Y(np.array([x, y]), rotate_theta, line_length, color=(255, 255, 0))
 
         annotation.append({
@@ -66,7 +66,7 @@ def click_event(event, x, y, flags, params):
 if __name__ == '__main__':
 
     # Annotation data directory
-    data_dir = 'manual_data/YCB_sim/height_map'
+    data_dir = 'Train/heightmaps'
 
     annotated_view_dir = data_dir + '_view'
     if not os.path.exists(annotated_view_dir):

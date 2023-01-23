@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import cv2
+import time
 import torch
 from torch.autograd import Variable
 from NN_models import TeacherNet, StudentNet, HybridNet, HybridNet2
@@ -138,7 +139,10 @@ class Trainer(object):
         input_depth_data = torch.from_numpy(input_depth_image.astype(np.float32)).permute(3, 2, 0, 1)
 
         # Pass input data through model
+        # st = time.time()
         output_prob, state_feat = self.model.forward(input_color_data, input_depth_data, is_volatile, specific_rotation)
+        # et = time.time()  # recording end time
+        # print('Execution time of inner forward passing:', et - st, 'seconds')
 
         # Return Q values (and remove extra padding)
         for rotate_idx in range(len(output_prob)):
@@ -237,7 +241,7 @@ class HybridTrainer(Trainer):
         tmp_label_weights[action_area > 0] = 1
         label_weights[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label_weights
 
-        config_area_size = 1
+        config_area_size = 3
         config_area = np.zeros((224, 224))
         config_area[best_pix_ind[1] - config_area_size:best_pix_ind[1] + config_area_size,
         best_pix_ind[2] - config_area_size:best_pix_ind[2] + config_area_size] = 1
@@ -253,10 +257,6 @@ class HybridTrainer(Trainer):
         tmp_config_mask = np.zeros((224, 224))
         tmp_config_mask[config_area > 0] = 1
         config_mask[0, 48:(320 - 48), 48:(320 - 48)] = tmp_config_mask
-
-        # Test
-        label_q[config_mask > 0] = label_value
-        label_weights = config_mask
 
         # Compute loss and backward pass
         self.optimizer.zero_grad()

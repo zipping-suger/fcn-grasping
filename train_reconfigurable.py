@@ -100,7 +100,7 @@ def main(args):
                                       best_pix_y * heightmap_resolution + workspace_limits[1][0],
                                       valid_depth_heightmap[best_pix_y][best_pix_x] + workspace_limits[2][0]]
                 primitive_config = nonlocal_variables['best_gripper_config']
-                assert -1 < primitive_config < 1  # range (-1,1)
+                assert -1 <= primitive_config <= 1  # range (-1,1)
 
                 # Save executed primitive
                 trainer.executed_action_log.append(
@@ -270,7 +270,7 @@ if __name__ == '__main__':
     parser.add_argument('--is_sim', dest='is_sim', action='store_true', default=True, help='run in simulation?')
     parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train',
                         help='directory containing 3D mesh files (.obj) of objects to be added to simulation')
-    parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=3,
+    parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=1,
                         help='number of objects to add to simulation')
     parser.add_argument('--heightmap_resolution', dest='heightmap_resolution', type=float, action='store',
                         default=0.002, help='meters per pixel of heightmap')
