@@ -273,10 +273,16 @@ def main(args):
             grasp_type = 1 if nonlocal_variables['primitive_action'] == 'grasp_1' else 2
 
             # Backpropagate
-            student_loss_value = trainer.backprop('student', prev_color_heightmap, prev_valid_depth_heightmap,
-                                                  prev_best_pix_ind,
-                                                  teacher_value,
-                                                  grasp_type)
+            # student_loss_value = trainer.backprop('student', prev_color_heightmap, prev_valid_depth_heightmap,
+            #                                       prev_best_pix_ind,
+            #                                       teacher_value,
+            #                                       grasp_type)
+
+            student_loss_value = trainer.student_backprop(prev_color_heightmap, prev_valid_depth_heightmap,
+                                                          prev_best_pix_ind,
+                                                          real_value,
+                                                          grasp_type)
+
             teacher_loss_value = trainer.backprop('teacher', prev_color_heightmap, prev_valid_depth_heightmap,
                                                   prev_best_pix_ind,
                                                   real_value,
@@ -417,7 +423,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_snapshot', dest='load_snapshot', action='store_true', default=False,
                         help='load pre-trained snapshot of model?')
     parser.add_argument('--teacher_snapshot_file', dest='teacher_snapshot_file', action='store',
-                        default='./logs/teacher_self/models/snapshot-backup.multiQ.pth')
+                        default='./logs/teacher_dense161_self/models/snapshot-002700.multiQ.pth')
     parser.add_argument('--snapshot_file', dest='snapshot_file', action='store')
     parser.add_argument('--continue_logging', dest='continue_logging', action='store_true', default=False,
                         help='continue logging from previous session?')
