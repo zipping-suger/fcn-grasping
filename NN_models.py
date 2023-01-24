@@ -385,7 +385,7 @@ class MultiQNet(nn.Module):
 
                 # Apply rotations to images
                 for rotate_idx in range(self.num_rotations):
-                    st = time.time()
+                    # st = time.time()
                     rotate_theta = np.radians(rotate_idx * (360 / self.num_rotations))
 
                     # Compute sample grid for rotation BEFORE neural network
@@ -443,8 +443,8 @@ class MultiQNet(nn.Module):
                         nn.Upsample(scale_factor=16, mode='bilinear').forward(
                             F.grid_sample(self.graspnet_2(interm_grasp_feat), flow_grid_after,
                                           mode='nearest'))])
-                    et = time.time()  # recording end time
-                    print('Execution time of forward passing:', et - st, 'seconds')
+                    # et = time.time()  # recording end time
+                    # print('Execution time of forward passing:', et - st, 'seconds')
             return output_prob, interm_feat
 
         else:
