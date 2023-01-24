@@ -268,16 +268,14 @@ class HybridTrainer(Trainer):
                                                                              is_volatile=False,
                                                                              specific_rotation=best_pix_ind[0])
             if self.use_cuda:
-                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320) * Variable(
-                    torch.from_numpy(config_mask).float().cuda(), requires_grad=False),
+                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320),
                                              Variable(torch.from_numpy(label_config).float().cuda())) * Variable(
                     torch.from_numpy(config_mask).float().cuda(), requires_grad=False)
                 loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
                                         Variable(torch.from_numpy(label_q).float().cuda())) * Variable(
                     torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
             else:
-                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320) * Variable(
-                    torch.from_numpy(config_mask).float(), requires_grad=False),
+                loss_config = self.criterion(self.model.output_prob[0][0].view(1, 320, 320),
                                              Variable(torch.from_numpy(label_config).float())) * Variable(
                     torch.from_numpy(config_mask).float(), requires_grad=False)
                 loss_q = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
@@ -557,6 +555,26 @@ class TSTrainer(Trainer):
         self.student_optimizer = torch.optim.SGD(self.student_model.parameters(), lr=1e-4, momentum=0.9,
                                                  weight_decay=2e-5)
 
+    def preload(self, transitions_directory):
+        self.executed_action_log = np.loadtxt(os.path.join(transitions_directory, 'executed-action.log.txt'),
+                                              delimiter=' ')
+        self.iteration = self.executed_action_log.shape[0] - 2
+        self.executed_action_log = self.executed_action_log[0:self.iteration, :]
+        self.executed_action_log = self.executed_action_log.tolist()
+        self.label_value_log = np.loadtxt(os.path.join(transitions_directory, 'real-value.log.txt'), delimiter=' ')
+        self.label_value_log = self.label_value_log[0:self.iteration]
+        self.label_value_log.shape = (self.iteration, 1)
+        self.label_value_log = self.label_value_log.tolist()
+        self.predicted_value_log = np.loadtxt(os.path.join(transitions_directory, 'predicted-value.log.txt'),
+                                              delimiter=' ')
+        self.predicted_value_log = self.predicted_value_log[0:self.iteration]
+        self.predicted_value_log.shape = (self.iteration, 1)
+        self.predicted_value_log = self.predicted_value_log.tolist()
+        self.reward_value_log = np.loadtxt(os.path.join(transitions_directory, 'teacher-value.log.txt'), delimiter=' ')
+        self.reward_value_log = self.reward_value_log[0:self.iteration]
+        self.reward_value_log.shape = (self.iteration, 1)
+        self.reward_value_log = self.reward_value_log.tolist()
+
     def ts_forward(self, model_type, color_heightmap, depth_heightmap, is_volatile=False, specific_rotation=-1):
         if model_type == 'teacher':
             self.model = self.teacher_model
@@ -731,3 +749,198 @@ class TSTrainer(Trainer):
         print('Training loss: %f' % loss_value)
         self.optimizer.step()
         return loss_value
+
+    def student_backprop(self, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_type):
+
+        label = np.zeros((1, 320, 320))
+        action_area = np.zeros((224, 224))
+        action_area[best_pix_ind[1]][best_pix_ind[2]] = 1
+        # blur_kernel = np.ones((5,5),np.float32)/25
+        # action_area = cv2.filter2D(action_area, -1, blur_kernel)
+        tmp_label = np.zeros((224, 224))
+        tmp_label[action_area > 0] = label_value
+        label[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label
+
+        # Compute label mask
+        label_weights = np.zeros((1, 320, 320))
+        tmp_label_weights = np.zeros((224, 224))
+        tmp_label_weights[action_area > 0] = 1
+        label_weights[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label_weights
+
+        # Compute loss and backward pass
+        self.student_optimizer.zero_grad()
+        loss_value = 0
+
+        if grasp_type == 1:  # barrett three-finger grasp
+            # Compute quality after rotating 120 degree
+            one_third_rotate_idx = (best_pix_ind[
+                                        0] + self.student_model.num_rotations / 3) % self.student_model.num_rotations
+            # Compute grasping quality after rotating 240 degree
+            sixty_rotate_idx = (best_pix_ind[
+                                    0] + self.student_model.num_rotations * 2 / 3) % self.student_model.num_rotations
+
+            for rotation_index in [best_pix_ind[0], one_third_rotate_idx, sixty_rotate_idx]:
+                # Do ts_forward pass with specified rotation (to save gradients)
+                with torch.no_grad():
+                    teacher_predictions_1, teacher_predictions_2, state_feat = self.ts_forward('teacher',
+                                                                                               color_heightmap,
+                                                                                               depth_heightmap,
+                                                                                               is_volatile=False,
+                                                                                               specific_rotation=rotation_index)
+                student_predictions_1, student_predictions_2, state_feat = self.ts_forward('student',
+                                                                                           color_heightmap,
+                                                                                           depth_heightmap,
+                                                                                           is_volatile=False,
+                                                                                           specific_rotation=rotation_index)
+
+                if self.use_cuda:
+                    loss_student = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
+                                                  Variable(torch.from_numpy(label).float().cuda())) * Variable(
+                        torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+                    loss_distillation = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
+                                                       Variable(self.teacher_model.output_prob[0][0].view(1, 320, 320),
+                                                                requires_grad=False))
+                else:
+                    loss_student = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
+                                                  Variable(torch.from_numpy(label).float())) * Variable(
+                        torch.from_numpy(label_weights).float(), requires_grad=False)
+                    loss_distillation = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
+                                                       Variable(self.teacher_model.output_prob[0][0].view(1, 320, 320),
+                                                                requires_grad=False))
+                loss = loss_student.sum() + 0.0001 * loss_distillation.sum()
+                loss.backward()
+                loss_value = loss.cpu().data.numpy()
+
+        elif grasp_type == 2:
+
+            # Compute grasping quality after rotating 180 degree
+            opposite_rotate_idx = (best_pix_ind[
+                                       0] + self.student_model.num_rotations / 2) % self.student_model.num_rotations
+
+            for rotation_index in [best_pix_ind[0], opposite_rotate_idx]:
+
+                # Do ts_forward pass with specified rotation (to save gradients)
+                with torch.no_grad():
+                    teacher_predictions_1, teacher_predictions_2, state_feat = self.ts_forward('teacher',
+                                                                                               color_heightmap,
+                                                                                               depth_heightmap,
+                                                                                               is_volatile=False,
+                                                                                               specific_rotation=rotation_index)
+                student_predictions_1, student_predictions_2, state_feat = self.ts_forward('student',
+                                                                                           color_heightmap,
+                                                                                           depth_heightmap,
+                                                                                           is_volatile=False,
+                                                                                           specific_rotation=rotation_index)
+
+                if self.use_cuda:
+                    loss_student = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
+                                                  Variable(torch.from_numpy(label).float().cuda())) * Variable(
+                        torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+                    loss_distillation = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
+                                                       Variable(self.teacher_model.output_prob[0][1].view(1, 320, 320),
+                                                                requires_grad=False))
+                else:
+                    loss_student = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
+                                                  Variable(torch.from_numpy(label).float())) * Variable(
+                        torch.from_numpy(label_weights).float(), requires_grad=False)
+                    loss_distillation = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
+                                                       Variable(self.teacher_model.output_prob[0][1].view(1, 320, 320),
+                                                                requires_grad=False))
+                loss = loss_student.sum() + 0.0001 * loss_distillation.sum()
+                loss.backward()
+                loss_value = loss.cpu().data.numpy()
+
+        else:
+            print("Grasp type error. Undefined")
+
+        print('Training loss: %f' % loss_value)
+        self.student_optimizer.step()
+        return loss_value
+
+    # def backprop(self, model_type, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_type):
+    #
+    #     if model_type == 'teacher':
+    #         self.model = self.teacher_model
+    #         self.optimizer = self.teacher_optimizer
+    #     elif model_type == 'student':
+    #         self.model = self.student_model
+    #         self.optimizer = self.student_optimizer
+    #     else:
+    #         raise ValueError("Network model Error")
+    #
+    #     # Compute labels for grasp quality
+    #     label = np.zeros((1, 320, 320))
+    #     action_area = np.zeros((224, 224))
+    #     action_area[best_pix_ind[1]][best_pix_ind[2]] = 1
+    #     # blur_kernel = np.ones((5,5),np.float32)/25
+    #     # action_area = cv2.filter2D(action_area, -1, blur_kernel)
+    #     tmp_label = np.zeros((224, 224))
+    #     tmp_label[action_area > 0] = label_value
+    #     label[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label
+    #
+    #     # Compute label mask
+    #     label_weights = np.zeros((1, 320, 320))
+    #     tmp_label_weights = np.zeros((224, 224))
+    #     tmp_label_weights[action_area > 0] = 1
+    #     label_weights[0, 48:(320 - 48), 48:(320 - 48)] = tmp_label_weights
+    #
+    #     # Compute loss and backward pass
+    #     self.optimizer.zero_grad()
+    #     loss_value = 0
+    #
+    #     if grasp_type == 1:  # barrett three-finger grasp
+    #         # Compute quality after rotating 120 degree
+    #         one_third_rotate_idx = (best_pix_ind[0] + self.model.num_rotations / 3) % self.model.num_rotations
+    #         # Compute grasping quality after rotating 240 degree
+    #         sixty_rotate_idx = (best_pix_ind[0] + self.model.num_rotations * 2 / 3) % self.model.num_rotations
+    #
+    #         for rotation_index in [best_pix_ind[0], one_third_rotate_idx, sixty_rotate_idx]:
+    #             # Do forward pass with specified rotation (to save gradients)
+    #             grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+    #                                                                                    depth_heightmap,
+    #                                                                                    is_volatile=False,
+    #                                                                                    specific_rotation=rotation_index)
+    #             if self.use_cuda:
+    #                 loss = self.criterion(self.model.output_prob[0][0].view(1, 320, 320),
+    #                                       Variable(torch.from_numpy(label).float().cuda())) * Variable(
+    #                     torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+    #             else:
+    #                 loss = self.criterion(self.model.output_prob[0][0].view(1, 320, 320),
+    #                                       Variable(torch.from_numpy(label).float())) * Variable(
+    #                     torch.from_numpy(label_weights).float(), requires_grad=False)
+    #
+    #             loss = loss.sum()
+    #             loss.backward()
+    #             loss_value = loss.cpu().data.numpy()
+    #
+    #     elif grasp_type == 2:
+    #
+    #         # Compute grasping quality after rotating 180 degree
+    #         opposite_rotate_idx = (best_pix_ind[0] + self.model.num_rotations / 2) % self.model.num_rotations
+    #
+    #         for rotation_index in [best_pix_ind[0], opposite_rotate_idx]:
+    #
+    #             # Do ts_forward pass with specified rotation (to save gradients)
+    #             grasp_predictions_1, grasp_predictions_2, state_feat = self.ts_forward(model_type, color_heightmap,
+    #                                                                                    depth_heightmap,
+    #                                                                                    is_volatile=False,
+    #                                                                                    specific_rotation=rotation_index)
+    #
+    #             if self.use_cuda:
+    #                 loss = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+    #                                       Variable(torch.from_numpy(label).float().cuda())) * Variable(
+    #                     torch.from_numpy(label_weights).float().cuda(), requires_grad=False)
+    #             else:
+    #                 loss = self.criterion(self.model.output_prob[0][1].view(1, 320, 320),
+    #                                       Variable(torch.from_numpy(label).float())) * Variable(
+    #                     torch.from_numpy(label_weights).float(), requires_grad=False)
+    #             loss = loss.sum()
+    #             loss.backward()
+    #             loss_value = loss.cpu().data.numpy()
+    #
+    #     else:
+    #         print("Grasp type error. Undefined")
+    #
+    #     print('Training loss: %f' % loss_value)
+    #     self.optimizer.step()
+    #     return loss_value
