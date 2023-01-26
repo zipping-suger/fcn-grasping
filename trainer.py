@@ -807,7 +807,7 @@ class TSTrainer(Trainer):
                     loss_distillation = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
                                                        Variable(self.teacher_model.output_prob[0][0].view(1, 320, 320),
                                                                 requires_grad=False))
-                loss = loss_student.sum() + 0.0001 * loss_distillation.sum()
+                loss = loss_student.sum() + 0.001 * loss_distillation.sum()
                 loss.backward()
                 loss_value = loss.cpu().data.numpy()
 
@@ -846,7 +846,7 @@ class TSTrainer(Trainer):
                     loss_distillation = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
                                                        Variable(self.teacher_model.output_prob[0][1].view(1, 320, 320),
                                                                 requires_grad=False))
-                loss = loss_student.sum() + 0.0001 * loss_distillation.sum()
+                loss = loss_student.sum() + 0.001 * loss_distillation.sum()
                 loss.backward()
                 loss_value = loss.cpu().data.numpy()
 

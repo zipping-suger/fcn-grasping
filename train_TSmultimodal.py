@@ -229,8 +229,8 @@ def main(args):
                                                                                                       color_heightmap,
                                                                                                       valid_depth_heightmap,
                                                                                                       is_volatile=True)
-            # Use student prediction to guide grasping behavior
-            grasp_1_predictions, grasp_2_predictions = student_grasp_1_predictions, student_grasp_2_predictions
+            # Use teacher prediction to guide grasping behavior
+            grasp_1_predictions, grasp_2_predictions = teacher_grasp_1_predictions, teacher_grasp_2_predictions
 
             # et = time.time()  # recording end time
             # print('Execution time of forward passing:', et - st, 'seconds')

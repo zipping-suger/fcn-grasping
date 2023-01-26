@@ -29,7 +29,7 @@ def plot_Y(centre_point, rotate_theta, radius, color=(0, 0, 255)):
 # of the points clicked on the image
 def click_event(event, x, y, flags, params):
     line_length = 20  # pixel
-    num_rotations = 16  # rotation number
+    num_rotations = 12  # rotation number
     global annotation
 
     if event == cv2.EVENT_LBUTTONDOWN:

@@ -116,6 +116,27 @@ class Robot(object):
         self.bg_color_img, self.bg_depth_img = self.get_camera_data()
         self.bg_depth_img = self.bg_depth_img * self.cam_depth_scale
 
+        sim_ret, self.in_hand_cam_handle = vrep.simxGetObjectHandle(self.sim_client, '/UR5/Vision_in_hand',
+                                                                   vrep.simx_opmode_blocking)
+
+        # Get camera pose and intrinsics in simulation
+        sim_ret, in_hand_cam_position = vrep.simxGetObjectPosition(self.sim_client, self.in_hand_cam_handle, -1,
+                                                           vrep.simx_opmode_blocking)
+        sim_ret, in_hand_cam_orientation = vrep.simxGetObjectOrientation(self.sim_client, self.in_hand_cam_handle, -1,
+                                                                 vrep.simx_opmode_blocking)
+        in_hand_cam_trans = np.eye(4, 4)
+        in_hand_cam_trans[0:3, 3] = np.asarray(in_hand_cam_position)
+        in_hand_cam_orientation = [-in_hand_cam_orientation[0], -in_hand_cam_orientation[1], -in_hand_cam_orientation[2]]
+        in_hand_cam_rotm = np.eye(4, 4)
+        in_hand_cam_rotm[0:3, 0:3] = np.linalg.inv(utils.euler2rotm(in_hand_cam_orientation))
+        self.in_hand_cam_pose = np.dot(in_hand_cam_trans, in_hand_cam_rotm)  # Compute rigid transformation representating camera pose
+        self.in_hand_cam_intrinsics = np.asarray([[618.62, 0, 320], [0, 618.62, 240], [0, 0, 1]])
+        self.in_hand_cam_depth_scale = 1
+
+        # Get background image
+        self.bg_color_img, self.bg_depth_img = self.get_in_hand_camera_data()
+        self.bg_depth_img = self.bg_depth_img * self.cam_depth_scale
+
     def add_objects(self):
 
         # Add each object to robot workspace at x,y location and orientation (random or pre-loaded)
@@ -251,6 +272,36 @@ class Robot(object):
 
             # Get depth image from simulation
             sim_ret, resolution, depth_buffer = vrep.simxGetVisionSensorDepthBuffer(self.sim_client, self.cam_handle,
+                                                                                    vrep.simx_opmode_blocking)
+            depth_img = np.asarray(depth_buffer)
+            depth_img.shape = (resolution[1], resolution[0])
+            depth_img = np.fliplr(depth_img)
+            zNear = 0.01
+            zFar = 10
+            depth_img = depth_img * (zFar - zNear) + zNear
+
+        else:
+            pass  # TODO
+
+        return color_img, depth_img
+
+    def get_in_hand_camera_data(self):
+
+        if self.is_sim:
+
+            # Get color image from simulation
+            sim_ret, resolution, raw_image = vrep.simxGetVisionSensorImage(self.sim_client, self.in_hand_cam_handle, 0,
+                                                                           vrep.simx_opmode_blocking)
+            color_img = np.asarray(raw_image)
+            color_img.shape = (resolution[1], resolution[0], 3)
+            color_img = color_img.astype(np.float) / 255
+            color_img[color_img < 0] += 1
+            color_img *= 255
+            color_img = np.fliplr(color_img)
+            color_img = color_img.astype(np.uint8)
+
+            # Get depth image from simulation
+            sim_ret, resolution, depth_buffer = vrep.simxGetVisionSensorDepthBuffer(self.sim_client, self.in_hand_cam_handle,
                                                                                     vrep.simx_opmode_blocking)
             depth_img = np.asarray(depth_buffer)
             depth_img.shape = (resolution[1], resolution[0])
