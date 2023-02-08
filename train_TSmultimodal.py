@@ -66,7 +66,7 @@ def main(args):
 
     # Initialize variables for heuristic bootstrapping and exploration probability
     no_change_count = [0, 0]
-
+    explore_mode = None
     # Quick share for nonlocal memory between threads
     nonlocal_variables = {'executing_action': False,
                           'primitive_action': None,
@@ -221,16 +221,23 @@ def main(args):
         if not exit_called:
             # Run forward pass with network to get affordances
             # st = time.time()  # recording start time
-            student_grasp_1_predictions, student_grasp_2_predictions, state_feat = trainer.ts_forward('student',
-                                                                                                      color_heightmap,
-                                                                                                      valid_depth_heightmap,
-                                                                                                      is_volatile=True)
-            teacher_grasp_1_predictions, teacher_grasp_2_predictions, state_feat = trainer.ts_forward('teacher',
-                                                                                                      color_heightmap,
-                                                                                                      valid_depth_heightmap,
-                                                                                                      is_volatile=True)
             # Use teacher prediction to guide grasping behavior
-            grasp_1_predictions, grasp_2_predictions = teacher_grasp_1_predictions, teacher_grasp_2_predictions
+            with torch.no_grad():
+                teacher_grasp_1_predictions, teacher_grasp_2_predictions, state_feat = trainer.ts_forward('teacher',
+                                                                                          color_heightmap,
+                                                                                          valid_depth_heightmap,
+                                                                                          is_volatile=True)
+                student_grasp_1_predictions, student_grasp_2_predictions, state_feat = trainer.ts_forward('student',
+                                                                                          color_heightmap,
+                                                                                          valid_depth_heightmap,
+                                                                                          is_volatile=True)
+            if explore_mode is None or explore_mode == 'teacherLead':
+
+                grasp_1_predictions, grasp_2_predictions = teacher_grasp_1_predictions, teacher_grasp_2_predictions
+            elif explore_mode == 'studentExplore':
+                grasp_1_predictions, grasp_2_predictions = student_grasp_1_predictions, student_grasp_2_predictions
+            else:
+                raise ValueError
 
             # et = time.time()  # recording end time
             # print('Execution time of forward passing:', et - st, 'seconds')
@@ -262,11 +269,11 @@ def main(args):
                     no_change_count[1] += 1
 
             # Compute training labels
-            teacher_value, real_value = trainer.get_label_value(prev_grasp_success, prev_best_pix_ind,
-                                                                prev_primitive_action, prev_color_heightmap,
-                                                                prev_valid_depth_heightmap)
-            trainer.label_value_log.append([teacher_value])
-            logger.write_to_log('teacher-value', trainer.label_value_log)
+            explore_mode, real_value = trainer.get_label_value(prev_grasp_success, prev_best_pix_ind,
+                                                               prev_primitive_action, prev_color_heightmap,
+                                                               prev_valid_depth_heightmap)
+            trainer.label_value_log.append([explore_mode])
+            logger.write_to_log('explore-mode', trainer.label_value_log)
             trainer.reward_value_log.append([real_value])
             logger.write_to_log('real-value', trainer.reward_value_log)
 
@@ -281,15 +288,16 @@ def main(args):
             student_loss_value = trainer.student_backprop(prev_color_heightmap, prev_valid_depth_heightmap,
                                                           prev_best_pix_ind,
                                                           real_value,
-                                                          grasp_type)
+                                                          grasp_type,
+                                                          explore_mode)
 
-            teacher_loss_value = trainer.backprop('teacher', prev_color_heightmap, prev_valid_depth_heightmap,
-                                                  prev_best_pix_ind,
-                                                  real_value,
-                                                  grasp_type)
+            # teacher_loss_value = trainer.backprop('teacher', prev_color_heightmap, prev_valid_depth_heightmap,
+            #                                       prev_best_pix_ind,
+            #                                       real_value,
+            #                                       grasp_type)
 
             logger.writer.add_scalar('student_loss', student_loss_value, trainer.iteration)
-            logger.writer.add_scalar('teacher_loss', teacher_loss_value, trainer.iteration)
+            # logger.writer.add_scalar('teacher_loss', teacher_loss_value, trainer.iteration)
 
             # Do sampling for experience replay
             if experience_replay:
@@ -402,7 +410,7 @@ if __name__ == '__main__':
 
     # --------------- Setup options ---------------
     parser.add_argument('--is_sim', dest='is_sim', action='store_true', default=True, help='run in simulation?')
-    parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train',
+    parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train_household',
                         help='directory containing 3D mesh files (.obj) of objects to be added to simulation')
     parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=3,
                         help='number of objects to add to simulation')

@@ -270,7 +270,7 @@ if __name__ == '__main__':
     parser.add_argument('--is_sim', dest='is_sim', action='store_true', default=True, help='run in simulation?')
     parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train',
                         help='directory containing 3D mesh files (.obj) of objects to be added to simulation')
-    parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=1,
+    parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=3,
                         help='number of objects to add to simulation')
     parser.add_argument('--heightmap_resolution', dest='heightmap_resolution', type=float, action='store',
                         default=0.002, help='meters per pixel of heightmap')

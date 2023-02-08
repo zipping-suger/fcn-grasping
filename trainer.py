@@ -557,20 +557,20 @@ class TSTrainer(Trainer):
 
     def preload(self, transitions_directory):
         self.executed_action_log = np.loadtxt(os.path.join(transitions_directory, 'executed-action.log.txt'),
-                                              delimiter=' ')
+                                              delimiter=' ', dtype=np.str)
         self.iteration = self.executed_action_log.shape[0] - 2
         self.executed_action_log = self.executed_action_log[0:self.iteration, :]
         self.executed_action_log = self.executed_action_log.tolist()
-        self.label_value_log = np.loadtxt(os.path.join(transitions_directory, 'real-value.log.txt'), delimiter=' ')
+        self.label_value_log = np.loadtxt(os.path.join(transitions_directory, 'real-value.log.txt'), delimiter=' ', dtype=np.str)
         self.label_value_log = self.label_value_log[0:self.iteration]
         self.label_value_log.shape = (self.iteration, 1)
         self.label_value_log = self.label_value_log.tolist()
-        self.predicted_value_log = np.loadtxt(os.path.join(transitions_directory, 'predicted-value.log.txt'),
-                                              delimiter=' ')
+        self.predicted_value_log = np.loadtxt(os.path.join(transitions_directory, 'predicted-value.log.txt', ),
+                                              delimiter=' ', dtype=np.str)
         self.predicted_value_log = self.predicted_value_log[0:self.iteration]
         self.predicted_value_log.shape = (self.iteration, 1)
         self.predicted_value_log = self.predicted_value_log.tolist()
-        self.reward_value_log = np.loadtxt(os.path.join(transitions_directory, 'teacher-value.log.txt'), delimiter=' ')
+        self.reward_value_log = np.loadtxt(os.path.join(transitions_directory, 'explore-mode.log.txt'), delimiter=' ', dtype=np.str)
         self.reward_value_log = self.reward_value_log[0:self.iteration]
         self.reward_value_log.shape = (self.iteration, 1)
         self.reward_value_log = self.reward_value_log.tolist()
@@ -586,25 +586,33 @@ class TSTrainer(Trainer):
         # Compute current reward
         current_reward = grasp_success
 
-        # Compute teacher reward
-        teacher_grasp_1_predictions, teacher_grasp_2_predictions, next_state_feat = self.ts_forward('teacher',
-                                                                                                    prev_color_heightmap,
-                                                                                                    prev_depth_heightmap,
-                                                                                                    is_volatile=True)
-
+        # Compute teacher prediction
+        with torch.no_grad():
+            teacher_predictions_1, teacher_predictions_2, state_feat = self.ts_forward('teacher',
+                                                                                       prev_color_heightmap,
+                                                                                       prev_depth_heightmap,
+                                                                                       is_volatile=False,
+                                                                                       specific_rotation=best_pix_id[0])
+            student_predictions_1, student_predictions_2, state_feat = self.ts_forward('student',
+                                                                                       prev_color_heightmap,
+                                                                                       prev_depth_heightmap,
+                                                                                       is_volatile=False,
+                                                                                       specific_rotation=best_pix_id[0])
         if primitive_action == 'grasp_1':
-            teacher_reward = teacher_grasp_1_predictions[best_pix_id]
+            dist_t = abs(teacher_predictions_1[0, best_pix_id[1], best_pix_id[2]] - int(grasp_success))
+            dist_s = abs(student_predictions_1[0, best_pix_id[1], best_pix_id[2]] - int(grasp_success))
+            explore_mode = 'teacherLead' if dist_t < dist_s else 'studentExplore'
         elif primitive_action == 'grasp_2':
-            teacher_reward = teacher_grasp_2_predictions[best_pix_id]
+            dist_t = abs(teacher_predictions_2[0, best_pix_id[1], best_pix_id[2]] - int(grasp_success))
+            dist_s = abs(student_predictions_2[0, best_pix_id[1], best_pix_id[2]] - int(grasp_success))
+            explore_mode = 'teacherLead' if dist_t < dist_s else 'studentExplore'
         else:
-            raise ValueError("invalid grasping mode!")
+            raise ValueError("wrong primitive action type")
 
         print('Current reward: %f' % current_reward)
-        print('Teacher reward: %f' % teacher_reward)
-        expected_reward = current_reward + self.teacher_reward_discount * teacher_reward
-        print('Expected reward: %f + %f x %f = %f' % (
-            current_reward, self.teacher_reward_discount, teacher_reward, expected_reward))
-        return expected_reward, current_reward
+        print('Explore mode: {}'.format(explore_mode))
+
+        return explore_mode, current_reward
 
     def backprop(self, model_type, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_type):
 
@@ -750,7 +758,7 @@ class TSTrainer(Trainer):
         self.optimizer.step()
         return loss_value
 
-    def student_backprop(self, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_type):
+    def student_backprop(self, color_heightmap, depth_heightmap, best_pix_ind, label_value, grasp_type,explore_mode):
 
         label = np.zeros((1, 320, 320))
         action_area = np.zeros((224, 224))
@@ -807,7 +815,12 @@ class TSTrainer(Trainer):
                     loss_distillation = self.criterion(self.student_model.output_prob[0][0].view(1, 320, 320),
                                                        Variable(self.teacher_model.output_prob[0][0].view(1, 320, 320),
                                                                 requires_grad=False))
-                loss = loss_student.sum() + 0.001 * loss_distillation.sum()
+                if explore_mode == 'teacherLead':
+                    loss = loss_student.sum() + 0.001 * loss_distillation.sum()
+                elif explore_mode == 'studentExplore':
+                    loss = loss_student.sum()
+                else:
+                    raise ValueError
                 loss.backward()
                 loss_value = loss.cpu().data.numpy()
 
@@ -846,7 +859,12 @@ class TSTrainer(Trainer):
                     loss_distillation = self.criterion(self.student_model.output_prob[0][1].view(1, 320, 320),
                                                        Variable(self.teacher_model.output_prob[0][1].view(1, 320, 320),
                                                                 requires_grad=False))
-                loss = loss_student.sum() + 0.001 * loss_distillation.sum()
+                if explore_mode == 'teacherLead':
+                    loss = loss_student.sum() + 0.001 * loss_distillation.sum()
+                elif explore_mode == 'studentExplore':
+                    loss = loss_student.sum()
+                else:
+                    raise ValueError
                 loss.backward()
                 loss_value = loss.cpu().data.numpy()
 

@@ -31,6 +31,11 @@ def main(args):
     force_cpu = args.force_cpu
     gripper_type = 'barrett'
 
+    # ------------- Test options -------------
+    is_test = args.is_test
+    model_snapshot = args.model_snapshot
+    test_model_type = args.model_type
+
     # ------------- Algorithm options -------------
     network_type = args.network_type
     future_reward_discount = args.future_reward_discount
@@ -41,7 +46,7 @@ def main(args):
     snapshot_file = os.path.abspath(args.snapshot_file) if load_snapshot else None
     continue_logging = args.continue_logging  # Continue logging from previous session
     logging_directory = os.path.abspath(args.logging_directory) if continue_logging else os.path.abspath('logs')
-    save_visualizations = args.save_visualizations  # Save visualizations of FCN predictions? Takes 0.6s per training step if set to True
+    save_visualizations = args.save_visualizations  # Save visualizations of FCN predictions? It takes some time.
 
     # Set random seed
     np.random.seed(random_seed)
@@ -50,7 +55,10 @@ def main(args):
     robot = Robot(is_sim, obj_mesh_dir, num_obj, workspace_limits, gripper_type)
 
     # Initialize trainer
-    trainer = MultiQTrainer(network_type, future_reward_discount, load_snapshot, snapshot_file, force_cpu)
+    if is_test:
+        trainer = MultiQTrainer(test_model_type, future_reward_discount, True, model_snapshot, force_cpu)
+    else:
+        trainer = MultiQTrainer(network_type, future_reward_discount, load_snapshot, snapshot_file, force_cpu)
 
     # Initialize data logger
     logger = Logger(continue_logging, logging_directory)
@@ -62,7 +70,7 @@ def main(args):
     if continue_logging:
         trainer.preload(logger.transitions_directory)
 
-    # Initialize variables for heuristic bootstrapping and exploration probability
+    # Initialize change count
     no_change_count = [0, 0]
 
     # Quick share for nonlocal memory between threads
@@ -75,13 +83,15 @@ def main(args):
         while True:
             if nonlocal_variables['executing_action']:
 
-                best_grasp_1_conf = np.max(grasp_1_predictions)
-                best_grasp_2_conf = np.max(grasp_2_predictions)
-                print('Primitive confidence scores: %f (grasp_1), %f (grasp_2)' % (
-                    best_grasp_1_conf, best_grasp_2_conf))
+                # best_grasp_1_conf = np.max(grasp_1_predictions)
+                # best_grasp_2_conf = np.max(grasp_2_predictions)
+
+                # print('Primitive confidence scores: %f (grasp_1), %f (grasp_2)' % (
+                #     best_grasp_1_conf, best_grasp_2_conf))
+                # nonlocal_variables['primitive_action'] = 'grasp_2'
+                # if best_grasp_1_conf > best_grasp_2_conf:
+                #     nonlocal_variables['primitive_action'] = 'grasp_1'
                 nonlocal_variables['primitive_action'] = 'grasp_2'
-                if best_grasp_1_conf > best_grasp_2_conf:
-                    nonlocal_variables['primitive_action'] = 'grasp_1'
 
                 # Get pixel location and rotation with highest affordance prediction from heuristic algorithms (rotation, y, x)
                 if nonlocal_variables['primitive_action'] == 'grasp_1':
@@ -253,11 +263,12 @@ def main(args):
 
             grasp_type = 1 if nonlocal_variables['primitive_action'] == 'grasp_1' else 2
 
-            # Backpropagate
-            loss_value = trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_best_pix_ind,
-                                          label_value,
-                                          grasp_type)
-            logger.writer.add_scalar('loss', loss_value, trainer.iteration)
+            if not is_test:
+                # Backpropagate
+                loss_value = trainer.backprop(prev_color_heightmap, prev_valid_depth_heightmap, prev_best_pix_ind,
+                                              label_value,
+                                              grasp_type)
+                logger.writer.add_scalar('loss', loss_value, trainer.iteration)
 
             # Do sampling for experience replay
             if experience_replay:
@@ -365,7 +376,7 @@ if __name__ == '__main__':
 
     # --------------- Setup options ---------------
     parser.add_argument('--is_sim', dest='is_sim', action='store_true', default=True, help='run in simulation?')
-    parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train',
+    parser.add_argument('--obj_mesh_dir', dest='obj_mesh_dir', action='store', default='objects/train_household',
                         help='directory containing 3D mesh files (.obj) of objects to be added to simulation')
     parser.add_argument('--num_obj', dest='num_obj', type=int, action='store', default=3,
                         help='number of objects to add to simulation')
@@ -381,7 +392,7 @@ if __name__ == '__main__':
                         default='student')
     parser.add_argument('--future_reward_discount', dest='future_reward_discount', type=float, action='store',
                         default=0)
-    parser.add_argument('--experience_replay', dest='experience_replay', action='store_true', default=True,
+    parser.add_argument('--experience_replay', dest='experience_replay', action='store_true', default=False,
                         help='use prioritized experience replay?')
 
     # ------ Pre-loading and logging options ------
@@ -393,6 +404,12 @@ if __name__ == '__main__':
     parser.add_argument('--logging_directory', dest='logging_directory', action='store')
     parser.add_argument('--save_visualizations', dest='save_visualizations', action='store_true', default=True,
                         help='save visualizations of FCN predictions?')
+
+    # ----- Model Evaluation options ------
+    parser.add_argument('--is_test', dest='is_test', action='store_true', default=False,
+                        help='model evaluation')
+    parser.add_argument('--model_snapshot', dest='model_snapshot', action='store')
+    parser.add_argument('--model_type', dest='model_type', action='store')
 
     # Run main program with specified arguments
     args = parser.parse_args()

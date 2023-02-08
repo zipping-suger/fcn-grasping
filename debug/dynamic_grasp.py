@@ -3,7 +3,7 @@ import utils
 import cv2
 import os
 import numpy as np
-from robot import Robot
+from robot_test import Robot
 from trainer import MultiQTrainer, get_prediction_vis
 import torch
 import warnings
@@ -35,10 +35,10 @@ if __name__ == '__main__':
     valid_depth_heightmap = depth_heightmap.copy()
     valid_depth_heightmap[np.isnan(valid_depth_heightmap)] = 0
 
-    trainer = MultiQTrainer('teacher', future_reward_discount=0, load_snapshot=False, snapshot_file=None,
+    trainer = MultiQTrainer('student', future_reward_discount=0, load_snapshot=False, snapshot_file=None,
                             force_cpu=False)
 
-    snapshot_file = '../logs/teacher_dense161_self/models/snapshot-002700.multiQ.pth'
+    snapshot_file = '../logs/student_household/models/snapshot-004400.multiQ.pth'
 
     trainer.model.load_state_dict(torch.load(snapshot_file))
     print('Pre-trained model snapshot loaded from: %s' % snapshot_file)
@@ -54,5 +54,3 @@ if __name__ == '__main__':
     grasp_pred_2_vis = get_prediction_vis(grasp_predictions_2, color_heightmap, best_pix_ind_2)
     cv2.imwrite(os.path.join('%06d.0.grasp_2.png' % j), grasp_pred_2_vis)
 
-    # color_heightmap = cv2.cvtColor(color_heightmap, cv2.COLOR_RGB2BGR)
-    # cv2.imwrite('color_heightmap.png', color_heightmap)
